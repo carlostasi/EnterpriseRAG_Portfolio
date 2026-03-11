@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  anythingllm:
+    image: mintplexlabs/anythingllm
+    container_name: anythingllm_portfolio
+    ports:
+      - "3001:3001"
+    environment:
+      - STORAGE_DIR=/app/server/storage
+    volumes:
+      # Usa un percorso relativo: crea una cartella "anythingllm_storage" qui dentro
+      - ./anythingllm_storage:/app/server/storage
+      # Mappa il file .env di AnythingLLM
+      - ./anythingllm_storage/.env:/app/server/.env
+    restart: unless-stopped
