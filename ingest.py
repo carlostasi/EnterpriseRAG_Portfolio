@@ -2,6 +2,7 @@ import boto3
 from langchain_community.document_loaders import PyPDFLoader        
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_aws import BedrockEmbeddings
+from langchain_chroma import Chroma
 
 print("Inizio il processo di Ingestion...\n")
 
@@ -25,10 +26,14 @@ frammenti = text_splitter.split_documents(documenti)
 print(f"Fatto! Il PDF è stato diviso in {len(frammenti)} frammenti di testo\n")
 
 # EMBEDDING
-print("Procedo a richiamare l'embedding con AWS")
-test_text = frammenti[0].page_content
-vettore_test = embeddings.embed_query(test_text)
+# print("Procedo a richiamare l'embedding con AWS")
+# test_text = frammenti[0].page_content
+# vettore_test = embeddings.embed_query(test_text)
 
-print(f"Success! Il vettore è composto da {len(vettore_test)} dimensioni")
-print(f"Primi 5 token: {vettore_test[:5]}")
+vectorStore = Chroma.from_documents(
+    documents = frammenti,
+    embedding = embeddings,
+    persist_directory = "./chroma_db"
+)
 
+print(f"Success! Tutti i vettori sono stati salvati nel database")
