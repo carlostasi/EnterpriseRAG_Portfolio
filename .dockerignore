@@ -1,0 +1,15 @@
+data/
+*.pdf
+*.docx
+*.doc
+
+# Ignora l'ambiente virtuale locale di Python (Docker scaricherà il suo)
+venv/
+env/
+.venv/
+
+# Ignora i file di cache inutili di Python
+__pycache__/
+*.pyc
+
+.env
