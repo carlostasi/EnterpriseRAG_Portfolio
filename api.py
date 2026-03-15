@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException
+from chromadb import HttpClient
+from fastapi import FastAPI, HTTPException, Security, Depends
 from pydantic import BaseModel
 import boto3
 from langchain_aws import BedrockEmbeddings, ChatBedrock
@@ -6,9 +7,17 @@ from langchain_chroma import Chroma
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_classic.chains import create_retrieval_chain
+from fastapi.security.api_key import APIKeyHeader
 
 # Inizializzo il server FastAPI
 app = FastAPI(title="Enterprise RAG API", description="API custom per interrogare documenti aziendali tramite AWS Bedrock")
+API_KEY = "PolvereDiStelle@2003"
+api_key_header = APIKeyHeader(name="Portfolio-API-Key")
+
+def verifica_api_key(api_key: str = Security(api_key_header)):
+    if api_key != API_KEY:
+        raise HTTPException(status_code=403, detail="Accesso negato. Chiave API errata." )
+    return api_key
 print("Avvio del motore RAG...")
 
 # Setup AWS e LangChain
@@ -59,7 +68,7 @@ class UserQuestion(BaseModel):
 
 # Creo l'endpoint
 @app.post("/chat")
-async def chat_with_docs(domanda: UserQuestion):
+async def chat_with_docs(domanda: UserQuestion, chiave: str = Depends(verifica_api_key)):
     try:
         # Arriva una richiesta e uso il RAG per rispondere
         result = rag_chain.invoke({"input": domanda.text})
