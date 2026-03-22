@@ -2,7 +2,7 @@ data/
 *.pdf
 *.docx
 *.doc
-
+temp_pdf/
 # Ignora l'ambiente virtuale locale di Python (Docker scaricherà il suo)
 venv/
 env/
