@@ -5,7 +5,10 @@ from langchain_aws import BedrockEmbeddings
 from langchain_mongodb import MongoDBAtlasVectorSearch
 from pymongo import MongoClient
 import boto3
+from dotenv import load_dotenv
 
+
+load_dotenv()
 # CONF
 MONGO_URI = os.environ.get("MONGO_URI")
 BUCKET_NAME = "portfolio-rag-documenti-carlo"
@@ -34,9 +37,11 @@ for obj in oggetti:
         s3.download_file(BUCKET_NAME, chiave_file, path_locale)
         print(f"⬇️ Scaricato: {chiave_file}")
 
+print("\nSto resettando MongoDB...")
+collection.delete_many({})
 loader = PyPDFDirectoryLoader("temp_pdf")
 documenti = loader.load()
-print(f"Trovati {len(documenti)} documenti su S3.")
+print(f"Trovate {len(documenti)} pagine di PDF su S3.")
 
 # Chunking
 print("Chunking...")
@@ -46,7 +51,7 @@ chunks = text_splitter.split_documents(documenti)
 # Inizio embedding
 embeddings = BedrockEmbeddings(model_id="amazon.titan-embed-text-v2:0")
 
-print("Caricamento su MongoDB...")
+print("Caricamento su MongoDB... (potrebbe volerci molto)")
 MongoDBAtlasVectorSearch.from_documents(
     documents=chunks,
     embedding=embeddings,

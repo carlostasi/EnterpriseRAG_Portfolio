@@ -57,7 +57,7 @@ vectorStore = MongoDBAtlasVectorSearch(
     text_key="text",
     embedding_key="embedding"
 )
-retriever = vectorStore.as_retriever(search_kwargs={"k": 3})
+retriever = vectorStore.as_retriever(search_kwargs={"k": 5})
 
 # PROMPT
 contextualize_q_system_prompt = (
@@ -80,9 +80,10 @@ history_aware_retriever = create_history_aware_retriever(
 
 sys_prompt = (
     "Sei un assistente aziendale super preciso."
-    "Usa i seguenti frammenti di contesto recuperati per rispondere alla domanda dell'utente."
-    "Se non conosci la risposta basandoti ESCLUSIVAMENTE sul contesto dì semplicemente che non lo sai."
-    "Non inventare MAI informazioni. Sii conciso e professionale.\n\n"
+    "Usa i seguenti frammenti di contesto recuperati QUI SOTTO e la CRONOLOGIA della chat per rispondere alla domanda dell'utente."
+    "Se l'utente fa riferimento a informazioni già discusse nella cronologia, usale. "
+    "Se non conosci la risposta basandoti su questi die elementi, dì semplicemente che non lo sai."
+    "Non inventare MAI informazioni fuori dal contesto o dalla cronologia. Sii conciso e professionale.\n\n"
     "CONTESTO TROVATO NEL DATABASE:\n"
     "{context}"
 )

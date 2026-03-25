@@ -1,12 +1,15 @@
 import streamlit as st
 import requests
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 # --- CONFIGURAZIONE ---
 # API_URL = "http://18.234.83.166:8000/chat" # L'indirizzo del tuo backend
 API_URL = "http://localhost:8000/chat"
 API_KEY = os.environ.get("API_KEY")# La chiave per parlare col backend
 
-# 🛑 LA NUOVA PASSWORD PER ENTRARE NEL SITO 🛑
+
 PASSWORD_SITO = os.environ.get("PASSWORD_SITO")
 
 st.set_page_config(page_title="Enterprise RAG", page_icon="🏢")
@@ -71,7 +74,7 @@ if controlla_password():
                         
                         st.session_state.messages.append({"role": "assistant", "content": risposta_ai + sezione_fonti})
                     elif response.status_code == 401 or response.status_code == 403:
-                        st.error("Accesso Negato dal Backend: API Key non valida. 🛑")
+                        st.error("Accesso Negato dal Backend: API Key non valida.")
                     else:
                         st.error(f"Errore del server: {response.status_code}")
                 except Exception as e:
