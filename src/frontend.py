@@ -58,24 +58,31 @@ if controlla_password():
         with st.chat_message("assistant"):
             with st.spinner("Sto consultando il database vettoriale... 🧠"):
                 headers = {"Portfolio-API-Key": API_KEY}
-                payload = {"text": prompt} # Assicurati che qui ci sia la parola giusta (es. "testo" o "domanda")
+                payload = {"text": prompt,
+                            "history": st.session_state.messages[:-1]} # Assicurati che qui ci sia la parola giusta (es. "testo" o "domanda")
                 
                 try:
-                    response = requests.post(API_URL, json=payload, headers=headers)
-                    if response.status_code == 200:
-                        dati = response.json()
-                        risposta_ai = dati["ai_answer"] # Assicurati dei nomi corretti
-                        fonti = dati["fonti"]
-                        
-                        st.markdown(risposta_ai)
-                        fonti_format = "\n".join(fonti)
-                        sezione_fonti = f"\n\n**📚 Fonti utilizzate:**\n{fonti_format}"
-                        st.caption(sezione_fonti)
-                        
-                        st.session_state.messages.append({"role": "assistant", "content": risposta_ai + sezione_fonti})
-                    elif response.status_code == 401 or response.status_code == 403:
-                        st.error("Accesso Negato dal Backend: API Key non valida.")
-                    else:
-                        st.error(f"Errore del server: {response.status_code}")
+                    # ATTENZIONE: stream=True è vitale!
+                    with requests.post(API_URL.replace("/chat", "/chat_stream"), json=payload, headers=headers, stream=True) as response:
+                        if response.status_code == 200:
+                            
+                            def read_stream():
+                                # Legge il fiume di testo pezzettino per pezzettino
+                                for chunk in response.iter_content(chunk_size=None, decode_unicode=True):
+                                    if chunk:
+                                        yield chunk
+                            
+                            # LA MAGIA DI STREAMLIT: full_response catturerà TUTTO il testo che esce dal tubo,
+                            # includendo sia la risposta di Claude sia le fonti che arrivano alla fine!
+                            full_response = st.write_stream(read_stream())
+                            
+                            # Salviamo TUTTO (risposta + fonti) nella memoria come un unico blocco di testo
+                            st.session_state.messages.append({"role": "assistant", "content": full_response})
+                            
+                        elif response.status_code in [401, 403]:
+                            st.error("Accesso Negato dal Backend: API Key non valida.")
+                        else:
+                            st.error(f"Errore del server: {response.status_code}")
+                            
                 except Exception as e:
                     st.error(f"Errore interno del Frontend: {str(e)}")
