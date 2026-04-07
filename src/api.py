@@ -61,10 +61,14 @@ vectorStore = MongoDBAtlasVectorSearch(
 retriever = vectorStore.as_retriever(
     search_type="mmr", # Attiva la logica di diversificazione
     search_kwargs={
-        "k": 5,
-        "fetch_k": 10, # Numeri di documenti iniziali che prende da Mongo,
+        "k": 10,
+        "fetch_k": 30, # Numeri di documenti iniziali che prende da Mongo,
         "lambda_mult": 0.5 # è il bilanciamento perfetto tra "simile alla domanda" e "diverso dagli altri chunk"
-    }    
+    }
+    # search_type="similarity",
+    # search_kwargs={
+    #     "k": 15
+    # }
 )
 
 # PROMPT
