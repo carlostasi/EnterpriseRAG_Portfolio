@@ -46,7 +46,7 @@ print(f"Trovate {len(documenti)} pagine di PDF su S3.")
 
 # Chunking
 print("Chunking...")
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=2500, chunk_overlap=500)
+text_splitter = RecursiveCharacterTextSplitter(chunk_size= 1500, chunk_overlap=250)
 chunks = text_splitter.split_documents(documenti)
 
 # Inizio embedding
