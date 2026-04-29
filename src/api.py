@@ -6,7 +6,7 @@ from pydantic import ValidationError, BaseModel
 from fastapi import FastAPI, HTTPException, Security, Depends
 from fastapi.responses import StreamingResponse
 from langchain_aws import BedrockEmbeddings, ChatBedrock
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_classic.chains import create_retrieval_chain, create_history_aware_retriever
 from fastapi.security.api_key import APIKeyHeader
@@ -47,13 +47,13 @@ if not MONGO_URI:
 # Ci connettiamo al cloud
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client["enterprise_rag"]
-collection = db["Procedure"]
+collection = db["Procedure_ParentChild"]
 
 # Carico dalla memoria
 vectorStore = MongoDBAtlasVectorSearch(
     collection = collection,
     embedding=embeddings,
-    index_name="vector_index",
+    index_name="vector_index_2",
     relevance_score_fn="cosine",
     text_key="text",
     embedding_key="embedding"
@@ -97,8 +97,11 @@ history_aware_retriever = create_history_aware_retriever(
 )
 
 sys_prompt = (
-    "Sei un assistente aziendale super preciso."
-    "Usa i seguenti frammenti di contesto recuperati QUI SOTTO e la CRONOLOGIA della chat per rispondere alla domanda dell'utente."
+    "Sei un assistente aziendale super preciso.\n"
+    "Usa i seguenti frammenti di contesto recuperati QUI SOTTO e la CRONOLOGIA della chat per rispondere alla domanda dell'utente.\n"
+    "ATTENZIONE REGOLA D'ORO: Ogni frammento inizia con 'FONTE: [nome file]'. "
+    "Se ti viene chiesta una procedura, DEVI estrarla DA UNA SOLA FONTE (quella più pertinente al titolo richiesto)."
+    "NON aggiungere MAI passaggi presi da altre fonti per allungare il brodo. Se la procedura in quella specifica fonte, fermati.\n"
     "ATTENZIONE: Se ti viene chiesta una procedura passo-passo, assicurati che i passaggi appartengano allo stesso documento logico."
     "NON mescolare mai procedure di file o macchinari diversi. Se il contesto si interrompe prima della fine della procedura, scrivi:"
     "'La procedura nei miei documenti si interrompe qui.'"
@@ -127,7 +130,14 @@ input: LLM, user_prompt
 output: prende i 5 frammenti che 'history_aware_retriever' porta, ne estrae il testo puro e lo mette nel {context} del sys prompt.
 Crea il super pacchetto da mandare a Claude per generare la risposta finale
 """
-question_answer_chain = create_stuff_documents_chain(llm, user_prompt)
+document_separator_prompt = PromptTemplate.from_template(
+    "--- INIZIO FONTE: {source} (Pagina {page}) ---\n"
+    "{page_content}\n"
+    "--- FINE FONTE ---\n"
+)
+question_answer_chain = create_stuff_documents_chain(llm, 
+                                                     user_prompt,
+                                                     document_prompt=document_separator_prompt)
 # Questa catena unisce la ricerca nel database con la generazione della risposta
 rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
 

@@ -1,9 +1,12 @@
-import os 
+import os, json
 from langchain_community.document_loaders import S3DirectoryLoader, PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_aws import BedrockEmbeddings
-from langchain_mongodb import MongoDBAtlasVectorSearch, MongoDBByteStore
-from langchain_core.retrievers import ParentDocumentRetriever
+from langchain_mongodb import MongoDBAtlasVectorSearch
+from langchain_community.storage.mongodb import MongoDBByteStore
+from langchain_core.documents import Document
+from langchain_classic.storage import EncoderBackedStore
+from langchain_classic.retrievers import ParentDocumentRetriever
 from pymongo import MongoClient
 import boto3
 from dotenv import load_dotenv
@@ -38,26 +41,9 @@ print("Chunking...")
 
 # Inizio embedding
 embeddings = BedrockEmbeddings(model_id="amazon.titan-embed-text-v2:0")
-batch_size = 500
-# total_chunks = len(chunks)
-
-vector_search = MongoDBAtlasVectorSearch(
-    embedding=embeddings,
-    collection=db["Procedure"],
-    index_name="vector_index"
-)
-
-print("Caricamento su MongoDB... (potrebbe volerci molto)")
-
-# for i in tqdm(range(0, total_chunks, batch_size), desc="Upload Progress"):
-#     batch = chunks[i : i + batch_size]
-#     vector_search.add_documents(documents=batch)
-
-
 # Proviamo ad usare i nuovi splitter per genitori e figli
-parent_splitter = RecursiveCharacterTextSplitter(chunk_size=2500, chunk_overlap=200)
-
-child_splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=50)
+parent_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=300)
+child_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
 
 # Creiamo il nuovo VectorStore (dove vivranno i child)
 collection_vettori = db["Procedure_ParentChild"]
@@ -68,11 +54,24 @@ vectorStore = MongoDBAtlasVectorSearch(
 )
 
 # Inizializziamo il DocStore (dove vivranno i parent)
-store = MongoDBByteStore(
+mongo_byte_store = MongoDBByteStore(
     connection_string=MONGO_URI,
     db_name="enterprise_rag",
     collection_name="Procedure_Genitori"
 )
+
+store = EncoderBackedStore(
+    store=mongo_byte_store,
+    key_encoder=lambda x: x,
+    value_serializer=lambda doc: json.dumps({"page_content": doc.page_content, "metadata": doc.metadata}).encode("utf-8"),
+    value_deserializer=lambda b: Document(**json.loads(b.decode("utf-8")))
+)
+
+# vector_search = MongoDBAtlasVectorSearch(
+#     embedding=embeddings,
+#     collection=db["Procedure"],
+#     index_name="vector_index"
+# )
 
 retriever = ParentDocumentRetriever(
     vectorstore = vectorStore,
@@ -80,7 +79,13 @@ retriever = ParentDocumentRetriever(
     child_splitter = child_splitter,
     parent_splitter = parent_splitter
 )
-retriever.add_documents(documenti)
+print("Caricamento su MongoDB... (potrebbe volerci molto)")
+batch_size = 2
+total_docs = len(documenti)
 
+
+for i in tqdm(range(0, total_docs, batch_size), desc="Upload Progress"):
+    batch = documenti[i : i + batch_size]
+    retriever.add_documents(batch)
 
 print("Caricamento su MongoDB completato!")
