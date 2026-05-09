@@ -6,31 +6,45 @@ from pydantic import ValidationError, BaseModel
 from fastapi import FastAPI, HTTPException, Security, Depends
 from fastapi.responses import StreamingResponse
 from langchain_aws import BedrockEmbeddings, ChatBedrock
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder, PromptTemplate
+from langchain_core.prompts import (
+    ChatPromptTemplate,
+    MessagesPlaceholder,
+    PromptTemplate,
+)
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
-from langchain_classic.chains import create_retrieval_chain, create_history_aware_retriever
+from langchain_classic.chains import (
+    create_retrieval_chain,
+    create_history_aware_retriever,
+)
 from fastapi.security.api_key import APIKeyHeader
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_mongodb import MongoDBAtlasVectorSearch
 from pymongo import MongoClient
 
 # Inizializzo il server FastAPI
-app = FastAPI(title="Enterprise RAG API", description="API custom per interrogare documenti aziendali tramite AWS Bedrock")
+app = FastAPI(
+    title="Enterprise RAG API",
+    description="API custom per interrogare documenti aziendali tramite AWS Bedrock",
+)
 API_KEY = os.environ.get("API_KEY")
 api_key_header = APIKeyHeader(name="Portfolio-API-Key")
 
+
 def verifica_api_key(api_key: str = Security(api_key_header)):
     if api_key != API_KEY:
-        raise HTTPException(status_code=403, detail="Accesso negato. Chiave API errata." )
+        raise HTTPException(
+            status_code=403, detail="Accesso negato. Chiave API errata."
+        )
     return api_key
+
+
 print("Avvio del motore RAG...")
 
 # Setup AWS e LangChain
 bedrock_client = boto3.client("bedrock-runtime", region_name="us-east-1")
 
 embeddings = BedrockEmbeddings(
-    client=bedrock_client,
-    model_id="amazon.titan-embed-text-v2:0"
+    client=bedrock_client, model_id="amazon.titan-embed-text-v2:0"
 )
 
 llm = ChatBedrock(
@@ -38,7 +52,7 @@ llm = ChatBedrock(
     model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
     # model_kwargs={"temperature": 0}
     temperature=0,
-    max_tokens=4096
+    max_tokens=4096,
 )
 MONGO_URI = os.environ.get("MONGO_URI")
 if not MONGO_URI:
@@ -47,24 +61,24 @@ if not MONGO_URI:
 # Ci connettiamo al cloud
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client["enterprise_rag"]
-collection = db["Procedure_ParentChild"]
+collection = db["Manuali_Child"]
 
 # Carico dalla memoria
 vectorStore = MongoDBAtlasVectorSearch(
-    collection = collection,
+    collection=collection,
     embedding=embeddings,
-    index_name="vector_index_2",
+    index_name="vector_index",
     relevance_score_fn="cosine",
     text_key="text",
-    embedding_key="embedding"
+    embedding_key="embedding",
 )
 retriever = vectorStore.as_retriever(
-    search_type="mmr", # Attiva la logica di diversificazione
+    search_type="similarity",  # Attiva la logica di diversificazione
     search_kwargs={
-        "k": 10,
-        "fetch_k": 30, # Numeri di documenti iniziali che prende da Mongo,
-        "lambda_mult": 0.5 # è il bilanciamento perfetto tra "simile alla domanda" e "diverso dagli altri chunk"
-    }
+        "k": 5,
+        # "fetch_k": 60,  # Numeri di documenti iniziali che prende da Mongo,
+        # "lambda_mult": 0.75,  # è il bilanciamento perfetto tra "simile alla domanda" e "diverso dagli altri chunk"
+    },
     # search_type="similarity",
     # search_kwargs={
     #     "k": 15
@@ -79,14 +93,16 @@ contextualize_q_system_prompt = (
     "NON rispondere alla domanda, riformulala solo se necessario per la ricerca, altrimenti restiuiscila cosi com'è."
 )
 
-"""Questo template serve esclusivamente per parlare con il database. Non si interessa di rispondere all'utente.
-Passa la cronologia e l'ultima domanda a Claude e si riscrive la domanda ottimizzata per la ricerca
- """
-contextualize_q_prompt = ChatPromptTemplate.from_messages([
-    ("system", contextualize_q_system_prompt), # Regole e premesse generali 
-    MessagesPlaceholder("chat_history"), # Passiamo la cronologia
-    ("human", "{input}") # Prompt dell'utente alla fine
-])
+# """Questo template serve esclusivamente per parlare con il database. Non si interessa di rispondere all'utente.
+# Passa la cronologia e l'ultima domanda a Claude e si riscrive la domanda ottimizzata per la ricerca
+#  """
+contextualize_q_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", contextualize_q_system_prompt),  # Regole e premesse generali
+        MessagesPlaceholder("chat_history"),  # Passiamo la cronologia
+        ("human", "{input}"),  # Prompt dell'utente alla FINE
+    ]
+)
 
 """
 input: LLM, database, prompt_contesto
@@ -97,17 +113,14 @@ history_aware_retriever = create_history_aware_retriever(
 )
 
 sys_prompt = (
-    "Sei un assistente aziendale super preciso.\n"
-    "Usa i seguenti frammenti di contesto recuperati QUI SOTTO e la CRONOLOGIA della chat per rispondere alla domanda dell'utente.\n"
-    "ATTENZIONE REGOLA D'ORO: Ogni frammento inizia con 'FONTE: [nome file]'. "
-    "Se ti viene chiesta una procedura, DEVI estrarla DA UNA SOLA FONTE (quella più pertinente al titolo richiesto)."
-    "NON aggiungere MAI passaggi presi da altre fonti per allungare il brodo. Se la procedura in quella specifica fonte, fermati.\n"
-    "ATTENZIONE: Se ti viene chiesta una procedura passo-passo, assicurati che i passaggi appartengano allo stesso documento logico."
-    "NON mescolare mai procedure di file o macchinari diversi. Se il contesto si interrompe prima della fine della procedura, scrivi:"
-    "'La procedura nei miei documenti si interrompe qui.'"
-    "Se l'utente fa riferimento a informazioni già discusse nella cronologia, usale. "
-    "Se non conosci la risposta basandoti su questi die elementi, dì semplicemente che non lo sai."
-    "Non inventare MAI informazioni fuori dal contesto o dalla cronologia. Sii conciso e professionale.\n\n"
+    "Sei un esperto assistente tecnico automobilistico super preciso.\n"
+    "Usa i frammenti estratti dai manuali recuperati QUI SOTTO e la CRONOLOGIA per rispondere.\n"
+    "REGOLA D'ORO: Ogni frammento di contesto che ricevi contiene il percorso del file. "
+    "Quando rispondi, DEVI citare in modo naturale il nome dell'auto o del manuale che stai usando (es. 'Secondo il manuale della Honda Civic...'), "
+    "ma NON DEVI MAI scrivere esplicitamente stringhe grezze come 'FONTE: Civic.pdf'. Rendi la risposta fluida e discorsiva.\n"
+    "PERICOLO CRITICO: NON mescolare MAI passaggi di veicoli o marche diverse.\n"
+    "Se il frammento si interrompe, fermati e scrivi: 'La procedura si interrompe qui.'\n"
+    "Non inventare MAI nulla. Sii professionale.\n\n"
     "CONTESTO TROVATO NEL DATABASE:\n"
     "{context}"
 )
@@ -116,11 +129,13 @@ sys_prompt = (
 Questo template genera la risposta finale. Prende i frammenti di testo che tornano dalla ricerca semantica nel db, li aggiunge alla cronologia,
 prende la domanda originale e prepara il pacchetto completo con il prompt dell'utente
 """
-user_prompt = ChatPromptTemplate.from_messages([
-    ("system", sys_prompt),
-    MessagesPlaceholder("chat_history"),
-    ("human", "{input}"),
-])
+user_prompt = ChatPromptTemplate.from_messages(
+    [
+        ("system", sys_prompt),
+        MessagesPlaceholder("chat_history"),
+        ("human", "{input}"),
+    ]
+)
 
 # Creazione della PIPELINE RAG
 # Questa catena dice a Claude come leggere i documenti.
@@ -135,20 +150,24 @@ document_separator_prompt = PromptTemplate.from_template(
     "{page_content}\n"
     "--- FINE FONTE ---\n"
 )
-question_answer_chain = create_stuff_documents_chain(llm, 
-                                                     user_prompt,
-                                                     document_prompt=document_separator_prompt)
+question_answer_chain = create_stuff_documents_chain(
+    llm, user_prompt, document_prompt=document_separator_prompt
+)
 # Questa catena unisce la ricerca nel database con la generazione della risposta
 rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+
 
 # Definizione struttura dati API in ingresso
 class UserQuestion(BaseModel):
     text: str
-    history: List[Dict[str, str]] = [] # Memoria della chat
+    history: List[Dict[str, str]] = []  # Memoria della chat
+
 
 # Creo l'endpoint
 @app.post("/chat")
-async def chat_with_docs(domanda: UserQuestion, chiave: str = Depends(verifica_api_key)):
+async def chat_with_docs(
+    domanda: UserQuestion, chiave: str = Depends(verifica_api_key)
+):
     try:
         # Arriva una richiesta e uso il RAG per rispondere
         chat_history = []
@@ -157,29 +176,34 @@ async def chat_with_docs(domanda: UserQuestion, chiave: str = Depends(verifica_a
                 chat_history.append(HumanMessage(content=msg["content"]))
             elif msg["role"] == "assistant":
                 chat_history.append(AIMessage(content=msg["content"]))
-        result = rag_chain.invoke({
-            "input": domanda.text,
-            "chat_history": chat_history
-            })
+        result = rag_chain.invoke({"input": domanda.text, "chat_history": chat_history})
+
+        text_generated = result["answer"]
         fonti_unificate = set()
         for doc in result["context"]:
-            path = doc.metadata.get('source', 'Sconosciuto')
+            path = doc.metadata.get("source", "Sconosciuto")
             nome_file = os.path.basename(path)
-            pagina = doc.metadata.get('page', 'N/A')
-            fonti_unificate.add(f"- {nome_file} (Pagina {pagina})")
+
+            if nome_file.lower() in text_generated.lower():
+                pagina = doc.metadata.get("page", "N/A")
+                fonti_unificate.add(f"- {nome_file} (Pagina {pagina})")
 
         return {
             "status": "success",
             "ai_answer": result["answer"],
-            "fonti": list(fonti_unificate)
+            "fonti": list(fonti_unificate),
         }
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @app.post("/chat_stream")
-async def chat_with_docs_stream(domanda: UserQuestion, chiave: str = Depends(verifica_api_key)):
+async def chat_with_docs_stream(
+    domanda: UserQuestion, chiave: str = Depends(verifica_api_key)
+):
     async def generatore_risposta():
         try:
             chat_history = []
@@ -188,29 +212,41 @@ async def chat_with_docs_stream(domanda: UserQuestion, chiave: str = Depends(ver
                     chat_history.append(HumanMessage(content=msg["content"]))
                 elif msg["role"] == "assistant":
                     chat_history.append(AIMessage(content=msg["content"]))
-            
+
             # Usiamo .astream() invece di .invoke()
-            fonti_unificate = set()
-            async for chunk in rag_chain.astream({
-                "input": domanda.text,
-                "chat_history": chat_history
-            }):
+            completed_text = ""
+            fonti_unificate = []
+            async for chunk in rag_chain.astream(
+                {"input": domanda.text, "chat_history": chat_history}
+            ):
                 # LangChain divide il flusso in pezzi. Cerchiamo la risposta finale.
                 if "answer" in chunk:
+                    completed_text += chunk["answer"]
                     # Inviamo il pezzettino di testo al frontend
                     yield chunk["answer"]
-                
+
                 # Raccogliamo le fonti man mano che passano nel flusso
                 if "context" in chunk:
-                    for doc in chunk["context"]:
-                        path = doc.metadata.get('source', 'Sconosciuto')
-                        nome_file = os.path.basename(path)
-                        pagina = doc.metadata.get('page', 'N/A')
-                        fonti_unificate.add(f"- {nome_file} (Pagina {pagina})")
-            
+                    fonti_unificate = chunk["context"]
+
             # Alla fine del flusso, mandiamo le fonti formattate
             if fonti_unificate:
-                yield "\n\n**📚 Fonti utilizzate:**\n" + "\n".join(fonti_unificate)
+                fonti_reali = set()
+                for doc in fonti_unificate:
+                    path = doc.metadata.get("source", "Sconosciuto")
+                    # 1. TRUCCO ANTI-WINDOWS: Sostituiamo le \ con le / e prendiamo l'ultimo pezzo
+                    nome_file_completo = path.replace("\\", "/").split("/")[-1] # Es: "Civic.pdf"
+                    
+                    # 2. Leviamo il .pdf per essere ancora più larghi di maniche (Es: "civic")
+                    parola_chiave = nome_file_completo.replace(".pdf", "").replace(".PDF", "").lower()
+                    nome_file = os.path.basename(path)
+                    # Controlliamo se Claude ha citato questo file nel suo discorso finale
+                    # 3. Controllo finale: "civic" è nel discorso di Claude?
+                    if parola_chiave in completed_text.lower():
+                        pagina = doc.metadata.get('page', 'N/A')
+                        fonti_reali.add(f"- {nome_file_completo} (Pagina {pagina})")
+                if fonti_reali:
+                    yield "\n\n**📚 Fonti utilizzate:**\n" + "\n".join(fonti_reali)
 
         except Exception as e:
             yield f"Errore durante lo streaming: {str(e)}"

@@ -1,4 +1,4 @@
-import os, json
+import os, json, pickle
 from langchain_community.document_loaders import S3DirectoryLoader, PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_aws import BedrockEmbeddings
@@ -11,42 +11,54 @@ from pymongo import MongoClient
 import boto3
 from dotenv import load_dotenv
 from tqdm import tqdm
-import dns.resolver
+from datetime import datetime
 
+def time_log():
+    return datetime.now().strftime("[%H:%M:%S]")    
 load_dotenv()
 # CONF
 MONGO_URI = os.environ.get("MONGO_URI")
 BUCKET_NAME = "portfolio-rag-documenti-carlo"
+CACHE_FILE = "docs_cache.pkl"
 
 if not MONGO_URI:
     raise ValueError("ERRORE: manca la stringa di connessione MONGO_URI")
 
-print(f"Connessione a MongoDB in corso...")
+print(f"{time_log()} Connessione a MongoDB in corso...")
 client = MongoClient(MONGO_URI)
 db = client["enterprise_rag"]
 
-os.makedirs("temp_pdf", exist_ok=True)
+os.makedirs("inputs", exist_ok=True)
 
-# print("\nSto resettando MongoDB...")
-# db["Procedure"].delete_many({})
-loader = PyPDFDirectoryLoader("temp_pdf")
-documenti = loader.load()
-print(f"Trovate {len(documenti)} pagine di PDF su S3.")
+# print(f"\n{time_log} Sto resettando MongoDB...")
+# db["Procedure_Genitori"].delete_many({})
+# db["Procedure_ParentChild"].delete_many({})
+
+print(f"\n{time_log()} Converto i documenti...")
+# 1. CONTROLLO CACHE: Il file esiste già
+if os.path.exists(CACHE_FILE):
+    print(f"{time_log()} Cache locale trovata! Caricamento dei PDF in corso...")
+    with open(CACHE_FILE, "rb") as f:
+        documenti = pickle.load(f)
+else:
+    loader = PyPDFDirectoryLoader("inputs")
+    documenti = loader.load()
+    print(f"{time_log()} Salvataggio dei documenti nella cache locale...")
+    with open(CACHE_FILE, "wb") as f:
+        pickle.dump(documenti, f)
+
+print(f"{time_log()} Trovate {len(documenti)} pagine di PDF")
 
 # Chunking
-print("Chunking...")
-# text_splitter = RecursiveCharacterTextSplitter(chunk_size= 1500, chunk_overlap=250)
-
-# chunks = text_splitter.split_documents(documenti)
-
+print(f"{time_log()} Chunking...")
 # Inizio embedding
 embeddings = BedrockEmbeddings(model_id="amazon.titan-embed-text-v2:0")
 # Proviamo ad usare i nuovi splitter per genitori e figli
-parent_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=300)
-child_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
+parent_splitter = RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=400)
+child_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
 
 # Creiamo il nuovo VectorStore (dove vivranno i child)
-collection_vettori = db["Procedure_ParentChild"]
+collection_vettori = db["Manuali_Child"]
 vectorStore = MongoDBAtlasVectorSearch(
     collection=collection_vettori,
     embedding=embeddings,
@@ -57,7 +69,7 @@ vectorStore = MongoDBAtlasVectorSearch(
 mongo_byte_store = MongoDBByteStore(
     connection_string=MONGO_URI,
     db_name="enterprise_rag",
-    collection_name="Procedure_Genitori"
+    collection_name="Manuali_Parent"
 )
 
 store = EncoderBackedStore(
@@ -67,19 +79,13 @@ store = EncoderBackedStore(
     value_deserializer=lambda b: Document(**json.loads(b.decode("utf-8")))
 )
 
-# vector_search = MongoDBAtlasVectorSearch(
-#     embedding=embeddings,
-#     collection=db["Procedure"],
-#     index_name="vector_index"
-# )
-
 retriever = ParentDocumentRetriever(
     vectorstore = vectorStore,
     docstore = store,
     child_splitter = child_splitter,
     parent_splitter = parent_splitter
 )
-print("Caricamento su MongoDB... (potrebbe volerci molto)")
+print(f"\n{time_log()} Caricamento su MongoDB... (potrebbe volerci molto)")
 batch_size = 2
 total_docs = len(documenti)
 
@@ -88,4 +94,4 @@ for i in tqdm(range(0, total_docs, batch_size), desc="Upload Progress"):
     batch = documenti[i : i + batch_size]
     retriever.add_documents(batch)
 
-print("Caricamento su MongoDB completato!")
+print(f"\n{time_log()} Caricamento su MongoDB completato!")

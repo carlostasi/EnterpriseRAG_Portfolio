@@ -8,3 +8,4 @@ temp_pdf/
 data/
 *.pdf
 tests/
+*.pkl
