@@ -1,75 +1,97 @@
-import os 
+import os, json, pickle
 from langchain_community.document_loaders import S3DirectoryLoader, PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_aws import BedrockEmbeddings
 from langchain_mongodb import MongoDBAtlasVectorSearch
+from langchain_community.storage.mongodb import MongoDBByteStore
+from langchain_core.documents import Document
+from langchain_classic.storage import EncoderBackedStore
+from langchain_classic.retrievers import ParentDocumentRetriever
 from pymongo import MongoClient
 import boto3
 from dotenv import load_dotenv
 from tqdm import tqdm
-import dns.resolver
+from datetime import datetime
 
+def time_log():
+    return datetime.now().strftime("[%H:%M:%S]")    
 load_dotenv()
 # CONF
 MONGO_URI = os.environ.get("MONGO_URI")
 BUCKET_NAME = "portfolio-rag-documenti-carlo"
+CACHE_FILE = "docs_cache.pkl"
 
 if not MONGO_URI:
     raise ValueError("ERRORE: manca la stringa di connessione MONGO_URI")
 
-print(f"Connessione a MongoDB in corso...")
+print(f"{time_log()} Connessione a MongoDB in corso...")
 client = MongoClient(MONGO_URI)
-collection = client["enterprise_rag"]["Procedure"]
+db = client["enterprise_rag"]
 
-# Scarico i documenti da S3
-# print(f"Scaricando i documenti dal bucket S3 '{BUCKET_NAME}...")
+os.makedirs("inputs", exist_ok=True)
 
-# Langchain ha un loader appsota per S3
-# loader = S3DirectoryLoader(BUCKET_NAME)
-# s3 = boto3.client("s3")
-os.makedirs("temp_pdf", exist_ok=True)
-# Prendi la lista dei file su S3 e scaricali
-# oggetti = s3.list_objects_v2(Bucket=BUCKET_NAME).get('Contents', [])
-# for obj in oggetti:
-#     chiave_file = obj['Key']
-#     if chiave_file.endswith(".pdf"): # Prende solo i PDF!
-#         path_locale = os.path.join("temp_pdf", chiave_file)
-#         os.makedirs(os.path.dirname(path_locale), exist_ok=True)
-#         s3.download_file(BUCKET_NAME, chiave_file, path_locale)
-#         print(f"⬇️ Scaricato: {chiave_file}")
+# print(f"\n{time_log} Sto resettando MongoDB...")
+# db["Procedure_Genitori"].delete_many({})
+# db["Procedure_ParentChild"].delete_many({})
 
-print("\nSto resettando MongoDB...")
-collection.delete_many({})
-loader = PyPDFDirectoryLoader("temp_pdf")
-documenti = loader.load()
-print(f"Trovate {len(documenti)} pagine di PDF su S3.")
+print(f"\n{time_log()} Converto i documenti...")
+# 1. CONTROLLO CACHE: Il file esiste già
+if os.path.exists(CACHE_FILE):
+    print(f"{time_log()} Cache locale trovata! Caricamento dei PDF in corso...")
+    with open(CACHE_FILE, "rb") as f:
+        documenti = pickle.load(f)
+else:
+    loader = PyPDFDirectoryLoader("inputs")
+    documenti = loader.load()
+    print(f"{time_log()} Salvataggio dei documenti nella cache locale...")
+    with open(CACHE_FILE, "wb") as f:
+        pickle.dump(documenti, f)
+
+print(f"{time_log()} Trovate {len(documenti)} pagine di PDF")
 
 # Chunking
-print("Chunking...")
-text_splitter = RecursiveCharacterTextSplitter(chunk_size= 1500, chunk_overlap=250)
-chunks = text_splitter.split_documents(documenti)
-
+print(f"{time_log()} Chunking...")
 # Inizio embedding
 embeddings = BedrockEmbeddings(model_id="amazon.titan-embed-text-v2:0")
-batch_size = 500
-total_chunks = len(chunks)
+# Proviamo ad usare i nuovi splitter per genitori e figli
+parent_splitter = RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=400)
+child_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=150)
 
-vector_search = MongoDBAtlasVectorSearch(
+# Creiamo il nuovo VectorStore (dove vivranno i child)
+collection_vettori = db["Manuali_Child"]
+vectorStore = MongoDBAtlasVectorSearch(
+    collection=collection_vettori,
     embedding=embeddings,
-    collection=collection,
-    index_name="vector_index"
+    index_name="vector_index_2"
 )
 
-print("Caricamento su MongoDB... (potrebbe volerci molto)")
+# Inizializziamo il DocStore (dove vivranno i parent)
+mongo_byte_store = MongoDBByteStore(
+    connection_string=MONGO_URI,
+    db_name="enterprise_rag",
+    collection_name="Manuali_Parent"
+)
 
-# MongoDBAtlasVectorSearch.from_documents(
-#     documents=chunks,   
-#     embedding=embeddings,
-#     collection=collection,
-#     index_name="vector_index"
-# )
-for i in tqdm(range(0, total_chunks, batch_size), desc="Upload Progress"):
-    batch = chunks[i : i + batch_size]
-    vector_search.add_documents(documents=batch)
+store = EncoderBackedStore(
+    store=mongo_byte_store,
+    key_encoder=lambda x: x,
+    value_serializer=lambda doc: json.dumps({"page_content": doc.page_content, "metadata": doc.metadata}).encode("utf-8"),
+    value_deserializer=lambda b: Document(**json.loads(b.decode("utf-8")))
+)
 
-print("Caricamento su MongoDB completato!")
+retriever = ParentDocumentRetriever(
+    vectorstore = vectorStore,
+    docstore = store,
+    child_splitter = child_splitter,
+    parent_splitter = parent_splitter
+)
+print(f"\n{time_log()} Caricamento su MongoDB... (potrebbe volerci molto)")
+batch_size = 2
+total_docs = len(documenti)
+
+
+for i in tqdm(range(0, total_docs, batch_size), desc="Upload Progress"):
+    batch = documenti[i : i + batch_size]
+    retriever.add_documents(batch)
+
+print(f"\n{time_log()} Caricamento su MongoDB completato!")

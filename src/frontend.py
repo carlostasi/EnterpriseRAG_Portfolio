@@ -72,8 +72,8 @@ if controlla_password():
                                     if chunk:
                                         yield chunk
                             
-                            # LA MAGIA DI STREAMLIT: full_response catturerà TUTTO il testo che esce dal tubo,
-                            # includendo sia la risposta di Claude sia le fonti che arrivano alla fine!
+                            # STREAMLIT: full_response catturerà TUTTO il testo che esce dal tubo,
+                            # includendo sia la risposta di Claude sia le fonti che arrivano alla fine
                             full_response = st.write_stream(read_stream())
                             
                             # Salviamo TUTTO (risposta + fonti) nella memoria come un unico blocco di testo
