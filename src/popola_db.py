@@ -1,9 +1,10 @@
+from anthropic.types import bash_code_execution_output_block_param
 import os, json, pickle
 from langchain_community.document_loaders import S3DirectoryLoader, PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_aws import BedrockEmbeddings
 from langchain_mongodb import MongoDBAtlasVectorSearch
-from langchain_community.storage.mongodb import MongoDBByteStore
+from langchain_community.storage.mongodb import MongoDBStore
 from langchain_core.documents import Document
 from langchain_classic.storage import EncoderBackedStore
 from langchain_classic.retrievers import ParentDocumentRetriever
@@ -23,6 +24,8 @@ CACHE_FILE = "docs_cache.pkl"
 
 if not MONGO_URI:
     raise ValueError("ERRORE: manca la stringa di connessione MONGO_URI")
+
+
 
 print(f"{time_log()} Connessione a MongoDB in corso...")
 client = MongoClient(MONGO_URI)
@@ -49,6 +52,23 @@ else:
 
 print(f"{time_log()} Trovate {len(documenti)} pagine di PDF")
 
+
+print(f"{time_log()} Creo i metadata...")
+for doc in documenti:
+    # Esempio path: "inputs/Mercedes/Classe_A.pdf"
+    path = doc.metadata["source"].replace("\\", "/") # Normalizziamo per Windows/Linux
+    parti = path.split("/")
+    
+    # La marca è solitamente la cartella (es. Mercedes)
+    marca = parti[-2].lower() if len(parti) >= 2 else "generico"
+    
+    # Il modello è il nome del file pulito (es. Classe A)
+    nome_file = parti[-1].replace(".pdf", "").replace(".PDF", "")
+    modello = nome_file.replace("_", " ").replace("-", " ").lower()
+    
+    # Aggiungiamo i metadati strutturati
+    doc.metadata["brand"] = marca
+    doc.metadata["model"] = modello
 # Chunking
 print(f"{time_log()} Chunking...")
 # Inizio embedding
@@ -62,21 +82,14 @@ collection_vettori = db["Manuali_Child"]
 vectorStore = MongoDBAtlasVectorSearch(
     collection=collection_vettori,
     embedding=embeddings,
-    index_name="vector_index_2"
+    index_name="vector_index"
 )
 
 # Inizializziamo il DocStore (dove vivranno i parent)
-mongo_byte_store = MongoDBByteStore(
+store = MongoDBStore(
     connection_string=MONGO_URI,
     db_name="enterprise_rag",
     collection_name="Manuali_Parent"
-)
-
-store = EncoderBackedStore(
-    store=mongo_byte_store,
-    key_encoder=lambda x: x,
-    value_serializer=lambda doc: json.dumps({"page_content": doc.page_content, "metadata": doc.metadata}).encode("utf-8"),
-    value_deserializer=lambda b: Document(**json.loads(b.decode("utf-8")))
 )
 
 retriever = ParentDocumentRetriever(
