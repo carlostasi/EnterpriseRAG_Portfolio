@@ -36,7 +36,7 @@ embeddings = BedrockEmbeddings(client=bedrock_client, model_id="amazon.titan-emb
 
 llm = ChatBedrock(
     client=bedrock_client,
-    model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
+    model="us.anthropic.claude-sonnet-4-20250514-v1:0",
     temperature=0,
     max_tokens=4096,
 )
