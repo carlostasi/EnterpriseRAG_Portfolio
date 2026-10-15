@@ -1,12 +1,9 @@
-from anthropic.types import bash_code_execution_output_block_param
-import os, json, pickle
-from langchain_community.document_loaders import S3DirectoryLoader, PyPDFDirectoryLoader
+import os
+from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_aws import BedrockEmbeddings
 from langchain_mongodb import MongoDBAtlasVectorSearch
 from langchain_community.storage.mongodb import MongoDBStore
-from langchain_core.documents import Document
-from langchain_classic.storage import EncoderBackedStore
 from langchain_classic.retrievers import ParentDocumentRetriever
 from pymongo import MongoClient
 import boto3
@@ -19,12 +16,9 @@ def time_log():
 load_dotenv()
 # CONF
 MONGO_URI = os.environ.get("MONGO_URI")
-BUCKET_NAME = "portfolio-rag-documenti-carlo"
-CACHE_FILE = "docs_cache.pkl"
 
 if not MONGO_URI:
     raise ValueError("ERRORE: manca la stringa di connessione MONGO_URI")
-
 
 
 print(f"{time_log()} Connessione a MongoDB in corso...")
@@ -33,22 +27,9 @@ db = client["enterprise_rag"]
 
 os.makedirs("inputs", exist_ok=True)
 
-# print(f"\n{time_log} Sto resettando MongoDB...")
-# db["Procedure_Genitori"].delete_many({})
-# db["Procedure_ParentChild"].delete_many({})
-
-print(f"\n{time_log()} Converto i documenti...")
-# 1. CONTROLLO CACHE: Il file esiste già
-if os.path.exists(CACHE_FILE):
-    print(f"{time_log()} Cache locale trovata! Caricamento dei PDF in corso...")
-    with open(CACHE_FILE, "rb") as f:
-        documenti = pickle.load(f)
-else:
-    loader = PyPDFDirectoryLoader("inputs")
-    documenti = loader.load()
-    print(f"{time_log()} Salvataggio dei documenti nella cache locale...")
-    with open(CACHE_FILE, "wb") as f:
-        pickle.dump(documenti, f)
+print(f"\n{time_log()} Leggo i PDF...")
+loader = PyPDFDirectoryLoader("inputs")
+documenti = loader.load()
 
 print(f"{time_log()} Trovate {len(documenti)} pagine di PDF")
 
@@ -99,7 +80,7 @@ retriever = ParentDocumentRetriever(
     parent_splitter = parent_splitter
 )
 print(f"\n{time_log()} Caricamento su MongoDB... (potrebbe volerci molto)")
-batch_size = 2
+batch_size = 20
 total_docs = len(documenti)
 
 

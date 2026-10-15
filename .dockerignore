@@ -1,8 +1,11 @@
 data/
+inputs/
 *.pdf
 *.docx
 *.doc
+*.pkl
 temp_pdf/
+anythingllm_storage/
 # Ignora l'ambiente virtuale locale di Python (Docker scaricherà il suo)
 venv/
 env/
@@ -13,3 +16,6 @@ __pycache__/
 *.pyc
 
 .env
+.git/
+.claude/
+.vscode/
