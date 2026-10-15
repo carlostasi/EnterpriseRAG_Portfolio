@@ -1,16 +1,27 @@
-version: '3.8'
-
+# Avvio: docker compose up -d --build
+# Ricrea sempre gli stessi container (rag-api, rag-frontend) invece di crearne di nuovi
 services:
-  anythingllm:
-    image: mintplexlabs/anythingllm
-    container_name: anythingllm_portfolio
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: automotive-rag-api
+    container_name: rag-api
+    env_file: .env
     ports:
-      - "3001:3001"
+      - "8000:8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    image: automotive-rag-frontend
+    container_name: rag-frontend
+    env_file: .env
     environment:
-      - STORAGE_DIR=/app/server/storage
-    volumes:
-      # Usa un percorso relativo: crea una cartella "anythingllm_storage" qui dentro
-      - ./anythingllm_storage:/app/server/storage
-      # Mappa il file .env di AnythingLLM
-      - ./anythingllm_storage/.env:/app/server/.env
-    restart: unless-stopped
+      # Dentro la rete di compose il backend si raggiunge col nome del servizio, non con localhost
+      - API_URL=http://api:8000
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api

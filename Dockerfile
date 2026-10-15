@@ -4,6 +4,9 @@ FROM python:3.11-slim
 # 2. Crea una cartella "app" dentro il container e lavora da lì
 WORKDIR /app
 
+# Senza buffer i print() compaiono subito in "docker compose logs"
+ENV PYTHONUNBUFFERED=1
+
 # 3. Copia SOLO il file dei requisiti per ora (trucco da pro per usare la cache di Docker e velocizzare le build future)
 COPY requirements.txt .
 

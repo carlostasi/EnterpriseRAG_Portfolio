@@ -5,8 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 # --- CONFIGURAZIONE ---
-# API_URL = "http://18.234.83.166:8000/chat" # L'indirizzo del tuo backend
-API_URL = "http://localhost:8000/chat"
+API_URL = os.environ.get("API_URL", "http://localhost:8000") # L'indirizzo del backend
 API_KEY = os.environ.get("API_KEY")# La chiave per parlare col backend
 
 
@@ -59,11 +58,11 @@ if controlla_password():
             with st.spinner("Sto consultando il database vettoriale... 🧠"):
                 headers = {"Portfolio-API-Key": API_KEY}
                 payload = {"text": prompt,
-                            "history": st.session_state.messages[:-1]} # Assicurati che qui ci sia la parola giusta (es. "testo" o "domanda")
-                
+                            "history": st.session_state.messages[:-1]}
+
                 try:
                     # ATTENZIONE: stream=True è vitale!
-                    with requests.post(API_URL.replace("/chat", "/chat_stream"), json=payload, headers=headers, stream=True) as response:
+                    with requests.post(f"{API_URL}/chat_stream", json=payload, headers=headers, stream=True) as response:
                         if response.status_code == 200:
                             
                             def read_stream():
