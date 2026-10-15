@@ -9,3 +9,7 @@ data/
 *.pdf
 tests/
 *.pkl
+
+
+.claude/
+Claude.md
